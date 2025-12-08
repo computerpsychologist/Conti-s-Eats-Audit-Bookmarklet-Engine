@@ -3,6 +3,7 @@
 //////////////////////////////////////////////////////
 // CONFIG — Variant Reference Name Table
 // BY : MARIO SANCHEZ
+// Version : 1.3
 //////////////////////////////////////////////////////
 const VARIANTS = {
 "48739436265749":["Petite Strawberry Shortcake","Petite Strawberry Shortcake"],
