@@ -1,13 +1,8 @@
-/* ================================
-  CONTI'S ZAPIET EATS AUDIT ENGINE v3.1
-  Author: Mario | computerpsychologist
-  Bookmarklet Loader Version
-================================ */
-
 (function () {
 
 //////////////////////////////////////////////////////
 // CONFIG — Variant Reference Name Table
+// BY : MARIO SANCHEZ
 //////////////////////////////////////////////////////
 const VARIANTS = {
 "48739436265749":["Petite Strawberry Shortcake","Petite Strawberry Shortcake"],
