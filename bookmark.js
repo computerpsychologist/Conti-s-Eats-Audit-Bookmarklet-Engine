@@ -1,11 +1,9 @@
-
-
 (function () {
 
 //////////////////////////////////////////////////////
 // CONFIG — Variant Reference Name Table
 // BY : MARIO SANCHEZ
-// Version : 1.9.3
+// Version : 1.9.4
 //////////////////////////////////////////////////////
 
   // Remove old panel if it exists
@@ -151,7 +149,7 @@
     { id: "46231334781205", variantName: "Family Size (approxiamtely good for 6 to 8 pax)", productName: "Truffle Mushroom Linguine (Large Food Order)" },
     { id: "46231334813973", variantName: "Party Size (approxiamtely good for 12 to 15 pax)", productName: "Truffle Mushroom Linguine (Large Food Order)" },
     { id: "45317878939925", variantName: "Regular (Maximum of 8km distance for delivery)", productName: "Ube Custard" },
-    { id: "45317878972693", variantName: "Mini (Maximum of 8km distance for delivery)", productName: "Ube Custard" },
+    { id: "45317878972693", variantName: "Mini (Maximum of 8km distance for delivery)", productName: "Ube Custard" }
   ];
 
   /************************************
