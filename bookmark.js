@@ -1,7 +1,7 @@
 (function () {
   /************************************
    * CONFIG – ZAPIET PDR UI HOOKS
-   * VERSION - 2.0.2
+   * VERSION - 2.0.3
    *************************************/
   const PANEL_ID = "zapietPdrAuditPanel";
 
@@ -146,7 +146,7 @@
   ];
 
   /************************************
-   * HELPERS – DATE FORMATTING
+   * HELPERS – DATE & STATUS
    *************************************/
   function formatDateList(raw) {
     if (!raw) return "";
@@ -213,6 +213,52 @@
     return formatted + " [" + type + "]";
   }
 
+  function deriveStatus(missing, restrictionType, hasRestrictions) {
+    if (missing) return "Missing";
+    const t = (restrictionType || "").toLowerCase();
+    if (t === "allow") return "Allow";
+    if (t === "deny") return "Deny";
+    if (t === "mixed") return "Mixed";
+    if (hasRestrictions) return "HasRules";
+    return "None";
+  }
+
+  function renderStatusBadge(status) {
+    const base =
+      "display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:999px;font-size:11px;font-weight:600;";
+    let style = base;
+    let label = status;
+
+    switch (status) {
+      case "Allow":
+        style += "background:#DCFCE7;color:#166534;border:1px solid #22C55E;";
+        label = "ALLOW";
+        break;
+      case "Deny":
+        style += "background:#FEE2E2;color:#991B1B;border:1px solid #EF4444;";
+        label = "DENY";
+        break;
+      case "Mixed":
+        style += "background:#FEF3C7;color:#92400E;border:1px solid #FACC15;";
+        label = "MIXED";
+        break;
+      case "HasRules":
+        style += "background:#DBEAFE;color:#1E3A8A;border:1px solid #3B82F6;";
+        label = "RULES";
+        break;
+      case "Missing":
+        style += "background:#F9FAFB;color:#4B5563;border:1px dashed #9CA3AF;";
+        label = "MISSING";
+        break;
+      default: // None
+        style += "background:#F3F4F6;color:#6B7280;border:1px solid #D1D5DB;";
+        label = "NONE";
+        break;
+    }
+
+    return `<span style="${style}">${label}</span>`;
+  }
+
   /************************************
    * SCRAPE ZAPIET PDR UI
    *************************************/
@@ -270,6 +316,7 @@
       : "";
     const missing = !z;
     const hasRestrictions = !!(productDates || deliveryDates);
+    const status = deriveStatus(missing, z && z.restrictionType, hasRestrictions);
 
     return {
       variantId: id,
@@ -280,6 +327,7 @@
       deliveryDates,
       missing,
       hasRestrictions,
+      status,
     };
   });
 
@@ -334,12 +382,12 @@
   const searchInput = document.createElement("input");
   searchInput.type = "search";
   searchInput.placeholder =
-    "Search Variant ID / Name / Restaurant / Dates…";
+    "Search Variant ID / Product / Restaurant / Dates / Status…";
   searchInput.style.fontSize = "12px";
   searchInput.style.padding = "6px 8px";
   searchInput.style.borderRadius = "6px";
   searchInput.style.border = "1px solid #d1d5db";
-  searchInput.style.minWidth = "240px";
+  searchInput.style.minWidth = "260px";
 
   // Filter select
   const filterSelect = document.createElement("select");
@@ -353,6 +401,9 @@
     { value: "missing", label: "Missing in Zapiet PDR" },
     { value: "withRestrictions", label: "With restrictions" },
     { value: "noRestrictions", label: "No restrictions" },
+    { value: "allow", label: "Status = ALLOW" },
+    { value: "deny", label: "Status = DENY" },
+    { value: "mixed", label: "Status = MIXED" },
   ].forEach((opt) => {
     const o = document.createElement("option");
     o.value = opt.value;
@@ -404,10 +455,11 @@
   const headRow = document.createElement("tr");
   const headers = [
     "VariantID",
-    "Variant Name",
-    "RestaurantName",
-    "P. Restriction Dates",
-    "D. Restriction Dates",
+    "Product – Variant Name",
+    "Restaurant",
+    "Pickup Restriction",
+    "Delivery Restriction",
+    "Status",
     "Missing?",
   ];
   headers.forEach((h) => {
@@ -439,9 +491,9 @@
       tr.style.background = idx % 2 ? "#ffffff" : "#f9fafb";
     }
 
-    function td(text) {
+    function tdHTML(html) {
       const cell = document.createElement("td");
-      cell.textContent = text || "";
+      cell.innerHTML = html || "";
       cell.style.padding = "6px 10px";
       cell.style.verticalAlign = "top";
       cell.style.fontSize = "12px";
@@ -451,16 +503,17 @@
       return cell;
     }
 
-    tr.appendChild(td(r.variantId));
-    tr.appendChild(td(r.variantName));
-    tr.appendChild(td(r.restaurantName || ""));
+    tr.appendChild(tdHTML(r.variantId));
+    tr.appendChild(tdHTML(`${r.productName} – ${r.variantName}`));
+    tr.appendChild(tdHTML(r.restaurantName || ""));
     tr.appendChild(
-      td(r.productDates || (r.missing ? "MISSING IN ZAPIET PDR" : ""))
+      tdHTML(r.productDates || (r.missing ? "MISSING IN ZAPIET PDR" : ""))
     );
     tr.appendChild(
-      td(r.deliveryDates || (r.missing ? "MISSING IN ZAPIET PDR" : ""))
+      tdHTML(r.deliveryDates || (r.missing ? "MISSING IN ZAPIET PDR" : ""))
     );
-    tr.appendChild(td(r.missing ? "YES" : "NO"));
+    tr.appendChild(tdHTML(renderStatusBadge(r.status)));
+    tr.appendChild(tdHTML(r.missing ? "YES" : "NO"));
 
     tbody.appendChild(tr);
     rowEls.push(tr);
@@ -499,6 +552,9 @@
         const hasRes = !!(r.productDates || r.deliveryDates);
         if (hasRes || r.missing) visible = false;
       }
+      if (currentFilter === "allow" && r.status !== "Allow") visible = false;
+      if (currentFilter === "deny" && r.status !== "Deny") visible = false;
+      if (currentFilter === "mixed" && r.status !== "Mixed") visible = false;
 
       // Search
       if (visible && q) {
@@ -513,7 +569,9 @@
           " " +
           (r.productDates || "") +
           " " +
-          (r.deliveryDates || "")
+          (r.deliveryDates || "") +
+          " " +
+          (r.status || "")
         ).toLowerCase();
         if (!haystack.includes(q)) visible = false;
       }
@@ -539,10 +597,11 @@
   csvBtn.addEventListener("click", function () {
     const headerRow = [
       "VariantID",
-      "Variant Name",
+      "Product – Variant Name",
       "RestaurantName",
-      "P. Restriction Dates",
-      "D. Restriction Dates",
+      "Pickup Restriction Dates",
+      "Delivery Restriction Dates",
+      "Status",
       "Missing?",
     ];
 
@@ -564,10 +623,11 @@
 
       const row = [
         r.variantId,
-        r.variantName,
+        `${r.productName} – ${r.variantName}`,
         r.restaurantName || "",
         r.productDates || (r.missing ? "MISSING IN ZAPIET PDR" : ""),
         r.deliveryDates || (r.missing ? "MISSING IN ZAPIET PDR" : ""),
+        r.status,
         r.missing ? "YES" : "NO",
       ];
       lines.push(row.map(escCsv).join(","));
