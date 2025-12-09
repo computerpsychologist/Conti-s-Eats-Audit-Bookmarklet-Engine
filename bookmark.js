@@ -1,13 +1,65 @@
-(function () {
+javascript:(function () {
+  /************************************
+   * CONFIG – UPDATE FOR ZAPIET UI
+   * VERSION - 1.7
+   *************************************/
+  const ZAPIET_CONFIG = {
+    // Main selector for each PDR row in Zapiet’s UI
+    rowSelector: '.zapiet-pdr-row', // <-- CHANGE THIS
 
-  /******************************
-   * 1. Memo Variant Master Data
-   * 2. Project by : EIT
-   * 3. Version : 1.6
-   ******************************/
+    // How to read data from each row – tweak as needed
+    getVariantId(el) {
+      // Try attribute then text
+      return (
+        el.getAttribute('data-variant-id') ||
+        (el.querySelector('.zapiet-pdr-variant-id') || {}).textContent ||
+        ''
+      ).trim();
+    },
+    getVariantName(el) {
+      return (
+        (el.querySelector('.zapiet-pdr-variant-name') || {}).textContent || ''
+      ).trim();
+    },
+    getRestaurantName(el) {
+      return (
+        (el.querySelector('.zapiet-pdr-location-name') || {}).textContent || ''
+      ).trim();
+    },
+    // Product restriction date text
+    getProductDates(el) {
+      return (
+        (el.querySelector('.zapiet-pdr-product-dates') || {}).textContent || ''
+      ).trim();
+    },
+    // Delivery restriction date text
+    getDeliveryDates(el) {
+      return (
+        (el.querySelector('.zapiet-pdr-delivery-dates') || {}).textContent || ''
+      ).trim();
+    },
+    // Allow / Deny text (if visible anywhere on the row)
+    getRestrictionType(el) {
+      const explicit =
+        (el.querySelector('.zapiet-pdr-restriction-type') || {})
+          .textContent || '';
+      const source = (explicit || el.textContent || '').toLowerCase();
+
+      const hasAllow = source.includes('allow');
+      const hasDeny = source.includes('deny');
+
+      if (hasAllow && !hasDeny) return 'Allow';
+      if (hasDeny && !hasAllow) return 'Deny';
+      if (hasAllow && hasDeny) return 'Mixed';
+      return '';
+    },
+  };
+
+  /************************************
+   * MEMO VARIANTS – FROM YOUR MESSAGE
+   *************************************/
   const MEMO_VARIANTS = [
-    // ID | Variant Name | Product Name
-{ id: "45317870780693", variantName: "Box of 12", productName: "Asado Roll (Pork)" },
+    { id: "45317870780693", variantName: "Box of 12", productName: "Asado Roll (Pork)" },
     { id: "46420646658325", variantName: "Box of 6", productName: "Asado Roll (Pork)" },
     { id: "45317870747925", variantName: "Per Piece", productName: "Asado Roll (Pork)" },
     { id: "45746820841749", variantName: "Banana Dream", productName: "Banana Dream" },
@@ -84,143 +136,445 @@
     { id: "46231334813973", variantName: "Party Size (approxiamtely good for 12 to 15 pax)", productName: "Truffle Mushroom Linguine (Large Food Order)" },
     { id: "45317878939925", variantName: "Regular (Maximum of 8km distance for delivery)", productName: "Ube Custard" },
     { id: "45317878972693", variantName: "Mini (Maximum of 8km distance for delivery)", productName: "Ube Custard" },
-    ];
+  ];
 
-  /*****************************************************
-   * 2. SELECTORS — adjust only these if DOM differs
-   *****************************************************/
-  const SELECTOR = {
-    row: ".zapiet-pdr-row",                          // each restriction item row
-    variantId: "[data-variant-id]",                  // input/id element
-    variantName: ".zapiet-pdr-variant-name",         // text label
-    restaurant: ".zapiet-pdr-location-name",         // location/store name
-    pickupDates: ".zapiet-pdr-product-dates",        // pickup restriction dates
-    deliveryDates: ".zapiet-pdr-delivery-dates",     // delivery restriction dates
-    type: ".zapiet-pdr-restriction-type"             // Allow / Deny label
-  };
-
-  /*************************************
-   * 3. Extract Zapiet Data (Selected Store)
+  /************************************
+   * PANEL INIT
    *************************************/
-  function getZapietList(){
-    return [...document.querySelectorAll(SELECTOR.row)].map(row => ({
-      id   : row.querySelector(SELECTOR.variantId)?.value?.trim() || "",
-      name : row.querySelector(SELECTOR.variantName)?.innerText?.trim() || "",
-      loc  : row.querySelector(SELECTOR.restaurant)?.innerText?.trim() || "",
-      pickup : row.querySelector(SELECTOR.pickupDates)?.innerText?.trim() || "",
-      delivery : row.querySelector(SELECTOR.deliveryDates)?.innerText?.trim() || "",
-      type : row.querySelector(SELECTOR.type)?.innerText?.trim() || "",
+  const PANEL_ID = 'zapietPdrAuditPanel';
+
+  // Remove old panel if any
+  const old = document.getElementById(PANEL_ID);
+  if (old) old.remove();
+
+  /************************************
+   * HELPERS
+   *************************************/
+  function formatDateList(raw) {
+    if (!raw) return '';
+
+    // Look for ISO-style dates (YYYY-MM-DD); adjust/extend if Zapiet uses another format
+    const matches = raw.match(/\d{4}-\d{2}-\d{2}/g);
+    if (!matches) {
+      // If no recognizable dates, return raw text
+      return raw.trim();
+    }
+
+    // Unique + sort
+    const unique = Array.from(new Set(matches)).map((d) => ({
+      iso: d,
+      date: new Date(d + 'T00:00:00'),
     }));
+    unique.sort((a, b) => a.date - b.date);
+
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul',
+                    'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    function fmt(d) {
+      const month = MONTHS[d.date.getMonth()];
+      const day = d.date.getDate();
+      return month + String(day);
+    }
+
+    // Group consecutive dates
+    const groups = [];
+    let start = unique[0];
+    let prev = unique[0];
+
+    for (let i = 1; i < unique.length; i++) {
+      const cur = unique[i];
+      const diffDays =
+        (cur.date - prev.date) / (1000 * 60 * 60 * 24);
+      if (diffDays === 1) {
+        // continue range
+        prev = cur;
+      } else {
+        groups.push([start, prev]);
+        start = cur;
+        prev = cur;
+      }
+    }
+    groups.push([start, prev]);
+
+    const tokens = groups.map(([a, b]) => {
+      if (a.iso === b.iso) {
+        return fmt(a) + ';';
+      }
+      const sameMonth = a.date.getMonth() === b.date.getMonth();
+      const first = fmt(a);
+      const second = sameMonth
+        ? MONTHS[b.date.getMonth()] + String(b.date.getDate())
+        : fmt(b);
+      return first + '-' + second + ';';
+    });
+
+    return tokens.join(' ');
   }
 
-  const zapiet = getZapietList();
-  const zapietMap = Object.fromEntries(zapiet.map(z => [z.id, z]));
+  function combineDatesAndType(rawDates, type) {
+    const formatted = formatDateList(rawDates || '');
+    if (!type) return formatted;
+    if (!formatted) return '[' + type + ']';
+    return formatted + ' [' + type + ']';
+  }
 
-  /*************************************
-   * 4. UI – Panel + Table Output
+  function collectZapietData() {
+    const rows = Array.from(
+      document.querySelectorAll(ZAPIET_CONFIG.rowSelector)
+    );
+    const data = [];
+
+    rows.forEach((rowEl) => {
+      const variantId = ZAPIET_CONFIG.getVariantId(rowEl);
+      if (!variantId) return;
+
+      const variantName = ZAPIET_CONFIG.getVariantName(rowEl);
+      const restaurantName = ZAPIET_CONFIG.getRestaurantName(rowEl);
+      const productDatesRaw = ZAPIET_CONFIG.getProductDates(rowEl);
+      const deliveryDatesRaw = ZAPIET_CONFIG.getDeliveryDates(rowEl);
+      const restrictionType = ZAPIET_CONFIG.getRestrictionType(rowEl);
+
+      data.push({
+        variantId: String(variantId),
+        variantName,
+        restaurantName,
+        productDatesRaw,
+        deliveryDatesRaw,
+        restrictionType,
+      });
+    });
+
+    return data;
+  }
+
+  /************************************
+   * BUILD DATASET (MEMO vs ZAPIET)
    *************************************/
-  const wrap = document.createElement("div");
-  wrap.style = `
-    position:fixed; inset:0; background:#00000090;
-    z-index:999999; display:flex; justify-content:center;
-    align-items:flex-start; padding:30px; font-family:sans-serif;
-  `;
-
-  const panel = document.createElement("div");
-  panel.style = `
-    background:#fff; width:95%; max-width:1400px; border-radius:10px;
-    overflow:hidden; box-shadow:0 10px 40px #0006; display:flex; flex-direction:column;
-  `;
-  wrap.appendChild(panel);
-
-  /******** Header Tools ********/
-  const header = document.createElement("div");
-  header.style="padding:12px 15px; display:flex; gap:10px; background:#f8f8f8; align-items:center;";
-  panel.appendChild(header);
-
-  const title = document.createElement("span");
-  title.innerText="Conti’s PDR Audit — Memo vs Zapiet Store";
-  title.style="flex:1;font-weight:bold;font-size:14px;";
-  header.appendChild(title);
-
-  const search = document.createElement("input");
-  search.placeholder="Search...";
-  search.style="padding:6px 8px;border:1px solid #ccc;border-radius:6px;min-width:200px;font-size:12px;";
-  header.appendChild(search);
-
-  const filter = document.createElement("select");
-  filter.innerHTML=`
-    <option value="all">All</option>
-    <option value="missing">Only Missing</option>
-    <option value="existing">Only Existing</option>
-  `;
-  filter.style="padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;";
-  header.appendChild(filter);
-
-  const btnCSV=document.createElement("button");
-  btnCSV.innerText="Export CSV";
-  btnCSV.style="padding:6px 10px;background:#111;color:#fff;border-radius:6px;font-size:12px;";
-  header.appendChild(btnCSV);
-
-  const close=document.createElement("button");
-  close.innerText="✕";
-  close.style="padding:4px 10px;border-radius:5px;border:1px solid #aaa;background:#fff;";
-  header.appendChild(close);
-
-  close.onclick=()=>wrap.remove();
-
-  /******** Table ********/
-  const body=document.createElement("div");
-  body.style="overflow:auto;";
-  panel.appendChild(body);
-
-  const table=document.createElement("table");
-  table.style="width:100%;border-collapse:collapse;font-size:12px;";
-  body.appendChild(table);
-
-  table.innerHTML=`
-    <thead>
-      <tr style="background:#eee">
-        <th style="padding:8px;">Variant ID</th>
-        <th style="padding:8px;">Variant Name</th>
-        <th style="padding:8px;">Store</th>
-        <th style="padding:8px;">Pickup Restriction</th>
-        <th style="padding:8px;">Delivery Restriction</th>
-        <th style="padding:8px;">Status</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  `;
-
-  const tbody=table.querySelector("tbody");
-
-  /*************************************
-   * 5. Render Rows (ONLY MEMO VARIANTS)
-   *************************************/
-  MEMO_VARIANTS.forEach(v=>{
-    const z = zapietMap[v.id] || null;
-    const missing = !z;
-    const tr=document.createElement("tr");
-
-    tr.style = missing ? "background:#ffe5e5" : "";
-
-    tr.innerHTML=`
-      <td style="padding:6px;">${v.id}</td>
-      <td style="padding:6px;">${v.variant}</td>
-      <td style="padding:6px;">${z?.loc||"-"}</td>
-      <td style="padding:6px;">${z?.pickup||"<span style='color:#b00;'>No Data</span>"}</td>
-      <td style="padding:6px;">${z?.delivery||"<span style='color:#b00;'>No Data</span>"}</td>
-      <td style="padding:6px;">
-        ${
-          missing
-          ? "<span style='padding:2px 6px;background:#c00;color:#fff;border-radius:4px;'>MISSING</span>"
-          : "<span style='padding:2px 6px;background:#0a0;color:#fff;border-radius:4px;'>OK</span>"
-        }
-      </td>
-    `;
-    tbody.appendChild(tr);
+  const zapietData = collectZapietData();
+  const zapietById = {};
+  zapietData.forEach((z) => {
+    const key = String(z.variantId);
+    if (!zapietById[key]) zapietById[key] = [];
+    zapietById[key].push(z);
   });
 
-  document.body.appendChild(wrap);
+  const rowsData = MEMO_VARIANTS.map((memo) => {
+    const id = String(memo.id);
+    const zapietRecords = zapietById[id] || [];
+    // If multiple rows for one variant in Zapiet, just merge basic info
+    const z = zapietRecords[0] || null;
 
+    const restaurantName = z ? z.restaurantName : '';
+    const productDates = z ? combineDatesAndType(z.productDatesRaw, z.restrictionType) : '';
+    const deliveryDates = z ? combineDatesAndType(z.deliveryDatesRaw, z.restrictionType) : '';
+    const missing = !z;
+
+    return {
+      variantId: id,
+      variantName: memo.variantName,
+      productName: memo.productName,
+      restaurantName,
+      productDates,
+      deliveryDates,
+      missing,
+    };
+  });
+
+  /************************************
+   * BUILD UI
+   *************************************/
+  const overlay = document.createElement('div');
+  overlay.id = PANEL_ID;
+  overlay.style.position = 'fixed';
+  overlay.style.inset = '0';
+  overlay.style.zIndex = '999999';
+  overlay.style.background = 'rgba(0,0,0,0.5)';
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'flex-start';
+  overlay.style.justifyContent = 'center';
+  overlay.style.padding = '24px';
+  overlay.style.boxSizing = 'border-box';
+  overlay.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+
+  const panel = document.createElement('div');
+  panel.style.background = '#fff';
+  panel.style.borderRadius = '10px';
+  panel.style.boxShadow = '0 10px 30px rgba(0,0,0,0.2)';
+  panel.style.width = '100%';
+  panel.style.maxWidth = '1400px';
+  panel.style.maxHeight = '100%';
+  panel.style.display = 'flex';
+  panel.style.flexDirection = 'column';
+  panel.style.overflow = 'hidden';
+
+  const header = document.createElement('div');
+  header.style.display = 'flex';
+  header.style.alignItems = 'center';
+  header.style.padding = '12px 16px';
+  header.style.borderBottom = '1px solid #e5e7eb';
+  header.style.background = '#f9fafb';
+  header.style.gap = '12px';
+
+  const title = document.createElement('div');
+  title.textContent = "Zapiet Product Date Restrictions – Memo Audit";
+  title.style.fontWeight = '600';
+  title.style.fontSize = '14px';
+  title.style.flex = '1 1 auto';
+
+  const controls = document.createElement('div');
+  controls.style.display = 'flex';
+  controls.style.gap = '8px';
+  controls.style.alignItems = 'center';
+
+  // Search box
+  const searchInput = document.createElement('input');
+  searchInput.type = 'search';
+  searchInput.placeholder = 'Search Variant ID / Name / Restaurant / Dates…';
+  searchInput.style.fontSize = '12px';
+  searchInput.style.padding = '6px 8px';
+  searchInput.style.borderRadius = '6px';
+  searchInput.style.border = '1px solid #d1d5db';
+  searchInput.style.minWidth = '240px';
+
+  // Filter select
+  const filterSelect = document.createElement('select');
+  filterSelect.style.fontSize = '12px';
+  filterSelect.style.padding = '6px 8px';
+  filterSelect.style.borderRadius = '6px';
+  filterSelect.style.border = '1px solid #d1d5db';
+
+  [
+    { value: 'all', label: 'All variants' },
+    { value: 'missing', label: 'Missing in Zapiet PDR' },
+    { value: 'withRestrictions', label: 'With restrictions' },
+    { value: 'noRestrictions', label: 'No restrictions' },
+  ].forEach((opt) => {
+    const o = document.createElement('option');
+    o.value = opt.value;
+    o.textContent = opt.label;
+    filterSelect.appendChild(o);
+  });
+
+  // CSV button
+  const csvBtn = document.createElement('button');
+  csvBtn.textContent = 'Download CSV';
+  csvBtn.style.fontSize = '12px';
+  csvBtn.style.padding = '6px 10px';
+  csvBtn.style.borderRadius = '6px';
+  csvBtn.style.border = '1px solid #d1d5db';
+  csvBtn.style.background = '#111827';
+  csvBtn.style.color = '#fff';
+  csvBtn.style.cursor = 'pointer';
+
+  // Close button
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '×';
+  closeBtn.title = 'Close';
+  closeBtn.style.fontSize = '16px';
+  closeBtn.style.lineHeight = '1';
+  closeBtn.style.padding = '4px 8px';
+  closeBtn.style.borderRadius = '999px';
+  closeBtn.style.border = '1px solid #d1d5db';
+  closeBtn.style.background = '#fff';
+  closeBtn.style.cursor = 'pointer';
+
+  controls.appendChild(searchInput);
+  controls.appendChild(filterSelect);
+  controls.appendChild(csvBtn);
+  controls.appendChild(closeBtn);
+
+  header.appendChild(title);
+  header.appendChild(controls);
+
+  const body = document.createElement('div');
+  body.style.flex = '1 1 auto';
+  body.style.overflow = 'auto';
+
+  const table = document.createElement('table');
+  table.style.width = '100%';
+  table.style.borderCollapse = 'collapse';
+  table.style.fontSize = '12px';
+
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  const headers = [
+    'VariantID',
+    'Variant Name',
+    'RestaurantName',
+    'P. Restriction Dates',
+    'D. Restriction Dates',
+  ];
+  headers.forEach((h) => {
+    const th = document.createElement('th');
+    th.textContent = h;
+    th.style.position = 'sticky';
+    th.style.top = '0';
+    th.style.background = '#f3f4f6';
+    th.style.borderBottom = '1px solid #e5e7eb';
+    th.style.padding = '8px 10px';
+    th.style.textAlign = 'left';
+    th.style.fontWeight = '600';
+    th.style.whiteSpace = 'nowrap';
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+
+  const tbody = document.createElement('tbody');
+
+  const rowEls = [];
+  rowsData.forEach((r, idx) => {
+    const tr = document.createElement('tr');
+    tr.dataset.index = String(idx);
+    tr.style.borderBottom = '1px solid #f3f4f6';
+
+    if (r.missing) {
+      tr.style.background = '#fef2f2';
+    } else {
+      tr.style.background = idx % 2 ? '#ffffff' : '#f9fafb';
+    }
+
+    function td(text) {
+      const cell = document.createElement('td');
+      cell.textContent = text || '';
+      cell.style.padding = '6px 10px';
+      cell.style.verticalAlign = 'top';
+      cell.style.fontSize = '12px';
+      cell.style.whiteSpace = 'nowrap';
+      cell.style.textOverflow = 'ellipsis';
+      cell.style.overflow = 'hidden';
+      return cell;
+    }
+
+    tr.appendChild(td(r.variantId));
+    tr.appendChild(td(r.variantName));
+    tr.appendChild(td(r.restaurantName || ''));
+    tr.appendChild(td(r.productDates || (r.missing ? 'MISSING IN ZAPIET PDR' : '')));
+    tr.appendChild(td(r.deliveryDates || (r.missing ? 'MISSING IN ZAPIET PDR' : '')));
+
+    tbody.appendChild(tr);
+    rowEls.push(tr);
+  });
+
+  table.appendChild(thead);
+  table.appendChild(tbody);
+
+  body.appendChild(table);
+  panel.appendChild(header);
+  panel.appendChild(body);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  /************************************
+   * FILTER / SEARCH / CSV / CLOSE
+   *************************************/
+  let currentSearch = '';
+  let currentFilter = 'all';
+
+  function applyFilters() {
+    const q = currentSearch.toLowerCase();
+
+    rowEls.forEach((tr) => {
+      const idx = Number(tr.dataset.index || '0');
+      const r = rowsData[idx];
+      let visible = true;
+
+      // Filter type
+      if (currentFilter === 'missing' && !r.missing) visible = false;
+      if (currentFilter === 'withRestrictions') {
+        const hasRes = !!(r.productDates || r.deliveryDates);
+        if (!hasRes) visible = false;
+      }
+      if (currentFilter === 'noRestrictions') {
+        const hasRes = !!(r.productDates || r.deliveryDates);
+        if (hasRes || r.missing) visible = false;
+      }
+
+      // Search
+      if (visible && q) {
+        const haystack = (
+          r.variantId +
+          ' ' +
+          r.variantName +
+          ' ' +
+          (r.productName || '') +
+          ' ' +
+          (r.restaurantName || '') +
+          ' ' +
+          (r.productDates || '') +
+          ' ' +
+          (r.deliveryDates || '')
+        ).toLowerCase();
+        if (!haystack.includes(q)) visible = false;
+      }
+
+      tr.style.display = visible ? '' : 'none';
+    });
+  }
+
+  searchInput.addEventListener('input', function () {
+    currentSearch = this.value || '';
+    applyFilters();
+  });
+
+  filterSelect.addEventListener('change', function () {
+    currentFilter = this.value || 'all';
+    applyFilters();
+  });
+
+  closeBtn.addEventListener('click', function () {
+    overlay.remove();
+  });
+
+  csvBtn.addEventListener('click', function () {
+    const headerRow = [
+      'VariantID',
+      'Variant Name',
+      'RestaurantName',
+      'P. Restriction Dates',
+      'D. Restriction Dates',
+      'Missing?',
+    ];
+
+    function escCsv(val) {
+      const s = String(val == null ? '' : val);
+      if (/[",\n]/.test(s)) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }
+
+    const lines = [];
+    lines.push(headerRow.map(escCsv).join(','));
+
+    rowEls.forEach((tr) => {
+      if (tr.style.display === 'none') return;
+      const idx = Number(tr.dataset.index || '0');
+      const r = rowsData[idx];
+
+      const row = [
+        r.variantId,
+        r.variantName,
+        r.restaurantName || '',
+        r.productDates || (r.missing ? 'MISSING IN ZAPIET PDR' : ''),
+        r.deliveryDates || (r.missing ? 'MISSING IN ZAPIET PDR' : ''),
+        r.missing ? 'YES' : 'NO',
+      ];
+      lines.push(row.map(escCsv).join(','));
+    });
+
+    const blob = new Blob([lines.join('\n')], {
+      type: 'text/csv;charset=utf-8;',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'zapiet-pdr-audit.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  // Initial apply
+  applyFilters();
 })();
