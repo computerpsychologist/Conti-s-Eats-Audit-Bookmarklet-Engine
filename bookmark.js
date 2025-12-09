@@ -1,8 +1,9 @@
 (function () {
   /************************************
-   * CONFIG – ZAPIET PDR UI HOOKS
-   * VERSION - 2.0.3
+   * CONFIG – PDR AUDIT
+   * VERSION 2.0.4
    *************************************/
+
   const PANEL_ID = "zapietPdrAuditPanel";
 
   // Remove old panel if it exists
@@ -10,57 +11,6 @@
     const old = document.getElementById(PANEL_ID);
     if (old) old.remove();
   })();
-
-  const ZAPIET_CONFIG = {
-    // Main selector for each PDR row in Zapiet’s UI
-    rowSelector: ".zapiet-pdr-row", // <-- CHANGE THIS IF NEEDED
-
-    // How to read data from each row – tweak as needed
-    getVariantId(el) {
-      return (
-        el.getAttribute("data-variant-id") ||
-        (el.querySelector(".zapiet-pdr-variant-id") || {}).textContent ||
-        ""
-      ).trim();
-    },
-    getVariantName(el) {
-      return (
-        (el.querySelector(".zapiet-pdr-variant-name") || {}).textContent || ""
-      ).trim();
-    },
-    getRestaurantName(el) {
-      return (
-        (el.querySelector(".zapiet-pdr-location-name") || {}).textContent || ""
-      ).trim();
-    },
-    // Product restriction date text (Pickup)
-    getProductDates(el) {
-      return (
-        (el.querySelector(".zapiet-pdr-product-dates") || {}).textContent || ""
-      ).trim();
-    },
-    // Delivery restriction date text
-    getDeliveryDates(el) {
-      return (
-        (el.querySelector(".zapiet-pdr-delivery-dates") || {}).textContent || ""
-      ).trim();
-    },
-    // Allow / Deny text (if visible anywhere on the row)
-    getRestrictionType(el) {
-      const explicit =
-        (el.querySelector(".zapiet-pdr-restriction-type") || {})
-          .textContent || "";
-      const source = (explicit || el.textContent || "").toLowerCase();
-
-      const hasAllow = source.includes("allow");
-      const hasDeny = source.includes("deny");
-
-      if (hasAllow && !hasDeny) return "Allow";
-      if (hasDeny && !hasAllow) return "Deny";
-      if (hasAllow && hasDeny) return "Mixed";
-      return "";
-    },
-  };
 
   /************************************
    * MEMO VARIANTS – YOUR MASTER LIST
@@ -142,197 +92,175 @@
     { id: "46231334781205", variantName: "Family Size (approxiamtely good for 6 to 8 pax)", productName: "Truffle Mushroom Linguine (Large Food Order)" },
     { id: "46231334813973", variantName: "Party Size (approxiamtely good for 12 to 15 pax)", productName: "Truffle Mushroom Linguine (Large Food Order)" },
     { id: "45317878939925", variantName: "Regular (Maximum of 8km distance for delivery)", productName: "Ube Custard" },
-    { id: "45317878972693", variantName: "Mini (Maximum of 8km distance for delivery)", productName: "Ube Custard" },
+    { id: "45317878972693", variantName: "Mini (Maximum of 8km distance for delivery)", productName: "Ube Custard" }
   ];
 
   /************************************
-   * HELPERS – DATE & STATUS
+   * HELPERS – RESTAURANT + DATES
    *************************************/
-  function formatDateList(raw) {
-    if (!raw) return "";
-
-    // Look for ISO-style dates (YYYY-MM-DD)
-    const matches = raw.match(/\d{4}-\d{2}-\d{2}/g);
-    if (!matches) {
-      return raw.trim();
+  function getRestaurant() {
+    try {
+      if (window.ZapietEats && typeof ZapietEats.getSelectedRestaurant === "function") {
+        const r = ZapietEats.getSelectedRestaurant();
+        if (r) return r;
+      }
+    } catch (e) {
+      console.warn("ZapietEats.getSelectedRestaurant error", e);
     }
+    if (window.restaurant) return window.restaurant;
+    return null;
+  }
 
-    const unique = Array.from(new Set(matches)).map((d) => ({
-      iso: d,
-      date: new Date(d + "T00:00:00"),
-    }));
-    unique.sort((a, b) => a.date - b.date);
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-    const MONTHS = [
-      "Jan","Feb","Mar","Apr","May","Jun",
-      "Jul","Aug","Sep","Oct","Nov","Dec"
-    ];
+  function compressDates(dateList) {
+    if (!dateList || !dateList.length) return "";
+    const parsed = dateList
+      .map((d) => new Date(d))
+      .filter((d) => !isNaN(d))
+      .sort((a, b) => a - b);
 
-    function fmt(d) {
-      const month = MONTHS[d.date.getMonth()];
-      const day = d.date.getDate();
-      return month + String(day);
-    }
+    if (!parsed.length) return "";
 
     const groups = [];
-    let start = unique[0];
-    let prev = unique[0];
+    let start = parsed[0];
+    let prev = parsed[0];
 
-    for (let i = 1; i < unique.length; i++) {
-      const cur = unique[i];
-      const diffDays = (cur.date - prev.date) / (1000 * 60 * 60 * 24);
+    for (let i = 1; i < parsed.length; i++) {
+      const curr = parsed[i];
+      const diffDays = (curr - prev) / 86400000;
       if (diffDays === 1) {
-        prev = cur;
+        prev = curr;
       } else {
         groups.push([start, prev]);
-        start = cur;
-        prev = cur;
+        start = curr;
+        prev = curr;
       }
     }
     groups.push([start, prev]);
 
-    const tokens = groups.map(([a, b]) => {
-      if (a.iso === b.iso) {
-        return fmt(a) + ";";
-      }
-      const sameMonth = a.date.getMonth() === b.date.getMonth();
-      const first = fmt(a);
-      const second = sameMonth
-        ? MONTHS[b.date.getMonth()] + String(b.date.getDate())
-        : fmt(b);
-      return first + "-" + second + ";";
-    });
-
-    return tokens.join(" ");
-  }
-
-  function combineDatesAndType(rawDates, type) {
-    const formatted = formatDateList(rawDates || "");
-    if (!type) return formatted;
-    if (!formatted) return "[" + type + "]";
-    return formatted + " [" + type + "]";
-  }
-
-  function deriveStatus(missing, restrictionType, hasRestrictions) {
-    if (missing) return "Missing";
-    const t = (restrictionType || "").toLowerCase();
-    if (t === "allow") return "Allow";
-    if (t === "deny") return "Deny";
-    if (t === "mixed") return "Mixed";
-    if (hasRestrictions) return "HasRules";
-    return "None";
-  }
-
-  function renderStatusBadge(status) {
-    const base =
-      "display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:999px;font-size:11px;font-weight:600;";
-    let style = base;
-    let label = status;
-
-    switch (status) {
-      case "Allow":
-        style += "background:#DCFCE7;color:#166534;border:1px solid #22C55E;";
-        label = "ALLOW";
-        break;
-      case "Deny":
-        style += "background:#FEE2E2;color:#991B1B;border:1px solid #EF4444;";
-        label = "DENY";
-        break;
-      case "Mixed":
-        style += "background:#FEF3C7;color:#92400E;border:1px solid #FACC15;";
-        label = "MIXED";
-        break;
-      case "HasRules":
-        style += "background:#DBEAFE;color:#1E3A8A;border:1px solid #3B82F6;";
-        label = "RULES";
-        break;
-      case "Missing":
-        style += "background:#F9FAFB;color:#4B5563;border:1px dashed #9CA3AF;";
-        label = "MISSING";
-        break;
-      default: // None
-        style += "background:#F3F4F6;color:#6B7280;border:1px solid #D1D5DB;";
-        label = "NONE";
-        break;
+    function fmt(d) {
+      return MONTHS[d.getMonth()] + String(d.getDate()).padStart(2, "0");
     }
 
-    return `<span style="${style}">${label}</span>`;
+    return groups
+      .map(([s, e]) => {
+        if (s.getMonth() === e.getMonth()) {
+          if (s.getDate() === e.getDate()) return fmt(s);
+          return MONTHS[s.getMonth()] + String(s.getDate()).padStart(2, "0") + "-" + String(e.getDate()).padStart(2, "0");
+        } else {
+          return fmt(s) + "-" + fmt(e);
+        }
+      })
+      .join("; ");
+  }
+
+  function classifyStatus(pkInfo, dlInfo) {
+    const types = new Set();
+    if (pkInfo && pkInfo.types) pkInfo.types.forEach((t) => types.add(t));
+    if (dlInfo && dlInfo.types) dlInfo.types.forEach((t) => types.add(t));
+
+    if (types.size === 0) return "NONE";
+    if (types.size === 1) {
+      const t = [...types][0];
+      if (t === "deny") return "DENY";
+      if (t === "allow") return "ALLOW";
+      return t.toUpperCase();
+    }
+    return "MIXED";
+  }
+
+  function getStatusColor(status) {
+    switch (status) {
+      case "DENY":
+        return "#B91C1C";
+      case "ALLOW":
+        return "#15803D";
+      case "MIXED":
+        return "#B45309";
+      case "NONE":
+      default:
+        return "#4B5563";
+    }
   }
 
   /************************************
-   * SCRAPE ZAPIET PDR UI
+   * COLLECT RESTRICTIONS FROM ZAPIET
    *************************************/
-  function collectZapietData() {
-    const rows = Array.from(
-      document.querySelectorAll(ZAPIET_CONFIG.rowSelector)
-    );
-    const data = [];
+  function collectRestrictions(restaurant) {
+    const pickupInfo = {};
+    const deliveryInfo = {};
 
-    rows.forEach((rowEl) => {
-      const variantId = ZAPIET_CONFIG.getVariantId(rowEl);
-      if (!variantId) return;
+    (restaurant.menus || []).forEach((menu) => {
+      const pkArr =
+        (((menu || {}).config || {}).store_pickup || {}).product_date_restrictions || [];
+      const dlArr =
+        (((menu || {}).config || {}).local_delivery || {}).product_date_restrictions || [];
 
-      const variantName = ZAPIET_CONFIG.getVariantName(rowEl);
-      const restaurantName = ZAPIET_CONFIG.getRestaurantName(rowEl);
-      const productDatesRaw = ZAPIET_CONFIG.getProductDates(rowEl);
-      const deliveryDatesRaw = ZAPIET_CONFIG.getDeliveryDates(rowEl);
-      const restrictionType = ZAPIET_CONFIG.getRestrictionType(rowEl);
+      pkArr.forEach((v) => {
+        const vid = String(v.variant_id);
+        if (!pickupInfo[vid]) pickupInfo[vid] = { dates: new Set(), types: new Set() };
+        (v.restricted_dates || []).forEach((d) => pickupInfo[vid].dates.add(d));
+        const t = String(v.restriction_type || "deny").toLowerCase();
+        pickupInfo[vid].types.add(t);
+      });
 
-      data.push({
-        variantId: String(variantId),
-        variantName,
-        restaurantName,
-        productDatesRaw,
-        deliveryDatesRaw,
-        restrictionType,
+      dlArr.forEach((v) => {
+        const vid = String(v.variant_id);
+        if (!deliveryInfo[vid]) deliveryInfo[vid] = { dates: new Set(), types: new Set() };
+        (v.restricted_dates || []).forEach((d) => deliveryInfo[vid].dates.add(d));
+        const t = String(v.restriction_type || "deny").toLowerCase();
+        deliveryInfo[vid].types.add(t);
       });
     });
 
-    return data;
+    return { pickupInfo, deliveryInfo };
   }
 
   /************************************
-   * BUILD DATASET (MEMO vs ZAPIET)
+   * BUILD DATASET (MEMO vs ZAPIET JSON)
    *************************************/
-  const zapietData = collectZapietData();
-  const zapietById = {};
-  zapietData.forEach((z) => {
-    const key = String(z.variantId);
-    if (!zapietById[key]) zapietById[key] = [];
-    zapietById[key].push(z);
-  });
+  const restaurant = getRestaurant();
+  if (!restaurant) {
+    alert("Please select a restaurant in the Zapiet Eats widget first, then run the audit bookmarklet again.");
+    return;
+  }
+
+  const { pickupInfo, deliveryInfo } = collectRestrictions(restaurant);
 
   const rowsData = MEMO_VARIANTS.map((memo) => {
     const id = String(memo.id);
-    const zapietRecords = zapietById[id] || [];
-    const z = zapietRecords[0] || null;
+    const pk = pickupInfo[id] || null;
+    const dl = deliveryInfo[id] || null;
 
-    const restaurantName = z ? z.restaurantName : "";
-    const productDates = z
-      ? combineDatesAndType(z.productDatesRaw, z.restrictionType)
-      : "";
-    const deliveryDates = z
-      ? combineDatesAndType(z.deliveryDatesRaw, z.restrictionType)
-      : "";
-    const missing = !z;
-    const hasRestrictions = !!(productDates || deliveryDates);
-    const status = deriveStatus(missing, z && z.restrictionType, hasRestrictions);
+    const pickupDates = pk && pk.dates.size ? compressDates(Array.from(pk.dates)) : "MISSING";
+    const deliveryDates = dl && dl.dates.size ? compressDates(Array.from(dl.dates)) : "MISSING";
+    const status = classifyStatus(pk, dl);
+
+    let missingFlag = "";
+    if (!pk && !dl) missingFlag = "PK & DL";
+    else if (!pk && dl) missingFlag = "PK";
+    else if (pk && !dl) missingFlag = "DL";
+
+    const hasRestrictions = !!(
+      (pk && pk.dates && pk.dates.size) ||
+      (dl && dl.dates && dl.dates.size)
+    );
 
     return {
       variantId: id,
-      variantName: memo.variantName,
-      productName: memo.productName,
-      restaurantName,
-      productDates,
-      deliveryDates,
-      missing,
-      hasRestrictions,
+      productVariant: memo.productName + " – " + memo.variantName,
+      restaurantName: restaurant.name || "",
+      pickup: pickupDates,
+      delivery: deliveryDates,
       status,
+      missing: missingFlag,
+      hasRestrictions
     };
   });
 
   /************************************
-   * BUILD WHITE OVERLAY UI
+   * BUILD UI PANEL
    *************************************/
   const overlay = document.createElement("div");
   overlay.id = PANEL_ID;
@@ -343,15 +271,14 @@
   overlay.style.display = "flex";
   overlay.style.alignItems = "flex-start";
   overlay.style.justifyContent = "center";
-  overlay.style.padding = "24px";
+  overlay.style.padding = "20px";
   overlay.style.boxSizing = "border-box";
-  overlay.style.fontFamily =
-    'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  overlay.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
   const panel = document.createElement("div");
-  panel.style.background = "#ffffff";
+  panel.style.background = "#FFFFFF";
   panel.style.borderRadius = "10px";
-  panel.style.boxShadow = "0 10px 30px rgba(0,0,0,0.2)";
+  panel.style.boxShadow = "0 10px 30px rgba(0,0,0,0.25)";
   panel.style.width = "100%";
   panel.style.maxWidth = "1400px";
   panel.style.maxHeight = "100%";
@@ -359,51 +286,45 @@
   panel.style.flexDirection = "column";
   panel.style.overflow = "hidden";
 
+  /**** Header ****/
   const header = document.createElement("div");
   header.style.display = "flex";
   header.style.alignItems = "center";
+  header.style.justifyContent = "space-between";
   header.style.padding = "12px 16px";
-  header.style.borderBottom = "1px solid #e5e7eb";
-  header.style.background = "#f9fafb";
-  header.style.gap = "12px";
+  header.style.borderBottom = "1px solid #E5E7EB";
+  header.style.background = "#F9FAFB";
 
   const title = document.createElement("div");
-  title.textContent = "Zapiet Product Date Restrictions – Memo Audit";
   title.style.fontWeight = "600";
   title.style.fontSize = "14px";
-  title.style.flex = "1 1 auto";
+  title.textContent = `Zapiet Product Date Restrictions – Memo Audit (${restaurant.name || "Restaurant"})`;
 
   const controls = document.createElement("div");
   controls.style.display = "flex";
-  controls.style.gap = "8px";
   controls.style.alignItems = "center";
+  controls.style.gap = "8px";
 
-  // Search box
   const searchInput = document.createElement("input");
   searchInput.type = "search";
-  searchInput.placeholder =
-    "Search Variant ID / Product / Restaurant / Dates / Status…";
+  searchInput.placeholder = "Search VariantID / Product / Variant / Status / MISSING…";
   searchInput.style.fontSize = "12px";
   searchInput.style.padding = "6px 8px";
   searchInput.style.borderRadius = "6px";
-  searchInput.style.border = "1px solid #d1d5db";
+  searchInput.style.border = "1px solid #D1D5DB";
   searchInput.style.minWidth = "260px";
 
-  // Filter select
   const filterSelect = document.createElement("select");
   filterSelect.style.fontSize = "12px";
   filterSelect.style.padding = "6px 8px";
   filterSelect.style.borderRadius = "6px";
-  filterSelect.style.border = "1px solid #d1d5db";
+  filterSelect.style.border = "1px solid #D1D5DB";
 
   [
     { value: "all", label: "All variants" },
-    { value: "missing", label: "Missing in Zapiet PDR" },
+    { value: "missing", label: "Missing (PK / DL / Both)" },
     { value: "withRestrictions", label: "With restrictions" },
-    { value: "noRestrictions", label: "No restrictions" },
-    { value: "allow", label: "Status = ALLOW" },
-    { value: "deny", label: "Status = DENY" },
-    { value: "mixed", label: "Status = MIXED" },
+    { value: "noRestrictions", label: "No restrictions" }
   ].forEach((opt) => {
     const o = document.createElement("option");
     o.value = opt.value;
@@ -411,18 +332,16 @@
     filterSelect.appendChild(o);
   });
 
-  // CSV button
   const csvBtn = document.createElement("button");
   csvBtn.textContent = "Download CSV";
   csvBtn.style.fontSize = "12px";
   csvBtn.style.padding = "6px 10px";
   csvBtn.style.borderRadius = "6px";
-  csvBtn.style.border = "1px solid #d1d5db";
+  csvBtn.style.border = "1px solid #D1D5DB";
   csvBtn.style.background = "#111827";
-  csvBtn.style.color = "#fff";
+  csvBtn.style.color = "#FFFFFF";
   csvBtn.style.cursor = "pointer";
 
-  // Close button
   const closeBtn = document.createElement("button");
   closeBtn.textContent = "×";
   closeBtn.title = "Close";
@@ -430,8 +349,8 @@
   closeBtn.style.lineHeight = "1";
   closeBtn.style.padding = "4px 8px";
   closeBtn.style.borderRadius = "999px";
-  closeBtn.style.border = "1px solid #d1d5db";
-  closeBtn.style.background = "#fff";
+  closeBtn.style.border = "1px solid #D1D5DB";
+  closeBtn.style.background = "#FFFFFF";
   closeBtn.style.cursor = "pointer";
 
   controls.appendChild(searchInput);
@@ -442,6 +361,33 @@
   header.appendChild(title);
   header.appendChild(controls);
 
+  /**** Summary strip ****/
+  const summaryStrip = document.createElement("div");
+  summaryStrip.style.fontSize = "11px";
+  summaryStrip.style.padding = "8px 16px";
+  summaryStrip.style.borderBottom = "1px solid #E5E7EB";
+  summaryStrip.style.background = "#EFF6FF";
+  summaryStrip.style.color = "#111827";
+
+  function updateSummary() {
+    const total = rowsData.length;
+    const deny = rowsData.filter((r) => r.status === "DENY").length;
+    const allow = rowsData.filter((r) => r.status === "ALLOW").length;
+    const mixed = rowsData.filter((r) => r.status === "MIXED").length;
+    const none = rowsData.filter((r) => r.status === "NONE").length;
+    const missingBoth = rowsData.filter((r) => r.missing === "PK & DL").length;
+    const missingPkOnly = rowsData.filter((r) => r.missing === "PK").length;
+    const missingDlOnly = rowsData.filter((r) => r.missing === "DL").length;
+
+    summaryStrip.textContent =
+      `Total variants: ${total} | DENY: ${deny} | ALLOW: ${allow} | ` +
+      `MIXED: ${mixed} | NONE: ${none} | ` +
+      `Missing PK: ${missingPkOnly} | Missing DL: ${missingDlOnly} | Missing PK & DL: ${missingBoth}`;
+  }
+
+  updateSummary();
+
+  /**** Body + Table ****/
   const body = document.createElement("div");
   body.style.flex = "1 1 auto";
   body.style.overflow = "auto";
@@ -452,189 +398,182 @@
   table.style.fontSize = "12px";
 
   const thead = document.createElement("thead");
+  thead.style.position = "sticky";
+  thead.style.top = "0";
+  thead.style.zIndex = "1";
+
   const headRow = document.createElement("tr");
-  const headers = [
+  headRow.style.background = "#F3F4F6";
+  headRow.style.borderBottom = "1px solid #E5E7EB";
+
+  [
     "VariantID",
-    "Product – Variant Name",
+    "Product – Variant",
     "Restaurant",
     "Pickup Restriction",
     "Delivery Restriction",
     "Status",
-    "Missing?",
-  ];
-  headers.forEach((h) => {
+    "MISSING"
+  ].forEach((h) => {
     const th = document.createElement("th");
     th.textContent = h;
-    th.style.position = "sticky";
-    th.style.top = "0";
-    th.style.background = "#f3f4f6";
-    th.style.borderBottom = "1px solid #e5e7eb";
     th.style.padding = "8px 10px";
     th.style.textAlign = "left";
     th.style.fontWeight = "600";
     th.style.whiteSpace = "nowrap";
+    th.style.borderBottom = "1px solid #E5E7EB";
     headRow.appendChild(th);
   });
   thead.appendChild(headRow);
 
   const tbody = document.createElement("tbody");
 
-  const rowEls = [];
-  rowsData.forEach((r, idx) => {
-    const tr = document.createElement("tr");
-    tr.dataset.index = String(idx);
-    tr.style.borderBottom = "1px solid #f3f4f6";
-
-    if (r.missing) {
-      tr.style.background = "#fef2f2";
-    } else {
-      tr.style.background = idx % 2 ? "#ffffff" : "#f9fafb";
-    }
-
-    function tdHTML(html) {
-      const cell = document.createElement("td");
-      cell.innerHTML = html || "";
-      cell.style.padding = "6px 10px";
-      cell.style.verticalAlign = "top";
-      cell.style.fontSize = "12px";
-      cell.style.whiteSpace = "nowrap";
-      cell.style.textOverflow = "ellipsis";
-      cell.style.overflow = "hidden";
-      return cell;
-    }
-
-    tr.appendChild(tdHTML(r.variantId));
-    tr.appendChild(tdHTML(`${r.productName} – ${r.variantName}`));
-    tr.appendChild(tdHTML(r.restaurantName || ""));
-    tr.appendChild(
-      tdHTML(r.productDates || (r.missing ? "MISSING IN ZAPIET PDR" : ""))
-    );
-    tr.appendChild(
-      tdHTML(r.deliveryDates || (r.missing ? "MISSING IN ZAPIET PDR" : ""))
-    );
-    tr.appendChild(tdHTML(renderStatusBadge(r.status)));
-    tr.appendChild(tdHTML(r.missing ? "YES" : "NO"));
-
-    tbody.appendChild(tr);
-    rowEls.push(tr);
-  });
-
   table.appendChild(thead);
   table.appendChild(tbody);
-
   body.appendChild(table);
-  panel.appendChild(header);
-  panel.appendChild(body);
-  overlay.appendChild(panel);
-  document.body.appendChild(overlay);
 
   /************************************
-   * FILTER / SEARCH / CSV / CLOSE
+   * FILTER / SEARCH / RENDER
    *************************************/
   let currentSearch = "";
   let currentFilter = "all";
 
-  function applyFilters() {
+  function getFilteredRows() {
     const q = currentSearch.toLowerCase();
-
-    rowEls.forEach((tr) => {
-      const idx = Number(tr.dataset.index || "0");
-      const r = rowsData[idx];
+    return rowsData.filter((r) => {
       let visible = true;
 
-      // Filter type
       if (currentFilter === "missing" && !r.missing) visible = false;
-      if (currentFilter === "withRestrictions") {
-        const hasRes = !!(r.productDates || r.deliveryDates);
-        if (!hasRes) visible = false;
-      }
-      if (currentFilter === "noRestrictions") {
-        const hasRes = !!(r.productDates || r.deliveryDates);
-        if (hasRes || r.missing) visible = false;
-      }
-      if (currentFilter === "allow" && r.status !== "Allow") visible = false;
-      if (currentFilter === "deny" && r.status !== "Deny") visible = false;
-      if (currentFilter === "mixed" && r.status !== "Mixed") visible = false;
+      if (currentFilter === "withRestrictions" && !r.hasRestrictions) visible = false;
+      if (currentFilter === "noRestrictions" && r.hasRestrictions) visible = false;
 
-      // Search
       if (visible && q) {
         const haystack = (
           r.variantId +
           " " +
-          r.variantName +
-          " " +
-          (r.productName || "") +
+          r.productVariant +
           " " +
           (r.restaurantName || "") +
           " " +
-          (r.productDates || "") +
+          r.pickup +
           " " +
-          (r.deliveryDates || "") +
+          r.delivery +
           " " +
-          (r.status || "")
+          r.status +
+          " " +
+          (r.missing || "")
         ).toLowerCase();
         if (!haystack.includes(q)) visible = false;
       }
 
-      tr.style.display = visible ? "" : "none";
+      return visible;
     });
   }
 
-  searchInput.addEventListener("input", function () {
-    currentSearch = this.value || "";
-    applyFilters();
-  });
+  function renderTable() {
+    tbody.innerHTML = "";
+    const rows = getFilteredRows();
 
-  filterSelect.addEventListener("change", function () {
-    currentFilter = this.value || "all";
-    applyFilters();
-  });
+    rows.forEach((r, idx) => {
+      const tr = document.createElement("tr");
+      tr.style.borderBottom = "1px solid #F3F4F6";
+      if (r.missing) {
+        tr.style.background = "#FEF2F2"; // light red for any missing
+      } else if (idx % 2) {
+        tr.style.background = "#FFFFFF";
+      } else {
+        tr.style.background = "#F9FAFB";
+      }
 
-  closeBtn.addEventListener("click", function () {
-    overlay.remove();
-  });
+      function td(text) {
+        const cell = document.createElement("td");
+        cell.textContent = text || "";
+        cell.style.padding = "6px 10px";
+        cell.style.verticalAlign = "top";
+        cell.style.fontSize = "12px";
+        cell.style.whiteSpace = "nowrap";
+        cell.style.textOverflow = "ellipsis";
+        cell.style.overflow = "hidden";
+        return cell;
+      }
 
-  csvBtn.addEventListener("click", function () {
+      tr.appendChild(td(r.variantId));
+      tr.appendChild(td(r.productVariant));
+      tr.appendChild(td(r.restaurantName || ""));
+      tr.appendChild(td(r.pickup));
+      tr.appendChild(td(r.delivery));
+
+      const statusCell = document.createElement("td");
+      statusCell.style.padding = "6px 10px";
+      const badge = document.createElement("span");
+      badge.textContent = r.status;
+      badge.style.display = "inline-block";
+      badge.style.padding = "2px 7px";
+      badge.style.borderRadius = "999px";
+      badge.style.fontSize = "11px";
+      badge.style.fontWeight = "600";
+      badge.style.color = "#FFFFFF";
+      badge.style.background = getStatusColor(r.status);
+      statusCell.appendChild(badge);
+      tr.appendChild(statusCell);
+
+      tr.appendChild(td(r.missing || "—"));
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  renderTable();
+
+  /************************************
+   * CSV EXPORT
+   *************************************/
+  function escCsv(val) {
+    const s = String(val == null ? "" : val);
+    if (/[",\n]/.test(s)) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  function exportCsv() {
+    const rows = getFilteredRows();
+    if (!rows.length) {
+      alert("No rows to export for the current filter/search.");
+      return;
+    }
+
     const headerRow = [
       "VariantID",
-      "Product – Variant Name",
-      "RestaurantName",
-      "Pickup Restriction Dates",
-      "Delivery Restriction Dates",
+      "Product – Variant",
+      "Restaurant",
+      "Pickup Restriction",
+      "Delivery Restriction",
       "Status",
-      "Missing?",
+      "MISSING"
     ];
-
-    function escCsv(val) {
-      const s = String(val == null ? "" : val);
-      if (/[",\n]/.test(s)) {
-        return '"' + s.replace(/"/g, '""') + '"';
-      }
-      return s;
-    }
 
     const lines = [];
     lines.push(headerRow.map(escCsv).join(","));
 
-    rowEls.forEach((tr) => {
-      if (tr.style.display === "none") return;
-      const idx = Number(tr.dataset.index || "0");
-      const r = rowsData[idx];
-
-      const row = [
-        r.variantId,
-        `${r.productName} – ${r.variantName}`,
-        r.restaurantName || "",
-        r.productDates || (r.missing ? "MISSING IN ZAPIET PDR" : ""),
-        r.deliveryDates || (r.missing ? "MISSING IN ZAPIET PDR" : ""),
-        r.status,
-        r.missing ? "YES" : "NO",
-      ];
-      lines.push(row.map(escCsv).join(","));
+    rows.forEach((r) => {
+      lines.push(
+        [
+          r.variantId,
+          r.productVariant,
+          r.restaurantName || "",
+          r.pickup,
+          r.delivery,
+          r.status,
+          r.missing || ""
+        ]
+          .map(escCsv)
+          .join(",")
+      );
     });
 
     const blob = new Blob([lines.join("\n")], {
-      type: "text/csv;charset=utf-8;",
+      type: "text/csv;charset=utf-8;"
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -644,8 +583,33 @@
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  }
+
+  /************************************
+   * HOOK EVENTS
+   *************************************/
+  searchInput.addEventListener("input", function () {
+    currentSearch = this.value || "";
+    renderTable();
   });
 
-  // Initial apply
-  applyFilters();
+  filterSelect.addEventListener("change", function () {
+    currentFilter = this.value || "all";
+    renderTable();
+  });
+
+  closeBtn.addEventListener("click", function () {
+    overlay.remove();
+  });
+
+  csvBtn.addEventListener("click", exportCsv);
+
+  /************************************
+   * MOUNT PANEL
+   *************************************/
+  panel.appendChild(header);
+  panel.appendChild(summaryStrip);
+  panel.appendChild(body);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
 })();
