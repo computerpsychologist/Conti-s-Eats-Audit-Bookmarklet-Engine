@@ -1,7 +1,7 @@
 (function () {
   /************************************
    * CONFIG – PDR AUDIT
-   * VERSION 2.0.5
+   * VERSION 2.0.6
    *************************************/
 
   const PANEL_ID = "zapietPdrAuditPanel";
@@ -96,7 +96,13 @@
     { id: "45317873041685", variantName: "Family Size (approxiamtely good for 6 to 8 pax)", productName: "Molo Soup" },
     { id: "45317880086805", variantName: "Molo Soup", productName: "Molo Soup" },
     { id: "45746492932373", variantName: "Single Order", productName: "Hearty Chowder" },
-    { id: "48520445985045", variantName: "Creamy Tomato Soup", productName: "Creamy Tomato Soup" }
+    { id: "48520445985045", variantName: "Creamy Tomato Soup", productName: "Creamy Tomato Soup" },
+    { id: "45317876580629", variantName: "Family Size (approximately good for 6 to 8 pax)", productName: "Callos" },
+    { id: "45317876613397", variantName: "Party Size (approximately good for 12 to 15 pax)", productName: "Callos" },
+    { id: "49520067772693", variantName: "Family Size", productName: "Bacon Mac & Cheese" },
+    { id: "49520067805461", variantName: "Party Size", productName: "Bacon Mac & Cheese" },
+    { id: "49520102572309", variantName: "Family Size", productName: "Cheesy Spaghettimelt" },
+    { id: "49520102605077", variantName: Party Size", productName: "Cheesy Spaghettimelt" }
   ];
 
   /************************************
