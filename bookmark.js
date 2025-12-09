@@ -1,7 +1,7 @@
 (function () {
   /************************************
    * CONFIG – PDR AUDIT
-   * VERSION 2.0.4
+   * VERSION 2.0.5
    *************************************/
 
   const PANEL_ID = "zapietPdrAuditPanel";
@@ -92,7 +92,11 @@
     { id: "46231334781205", variantName: "Family Size (approxiamtely good for 6 to 8 pax)", productName: "Truffle Mushroom Linguine (Large Food Order)" },
     { id: "46231334813973", variantName: "Party Size (approxiamtely good for 12 to 15 pax)", productName: "Truffle Mushroom Linguine (Large Food Order)" },
     { id: "45317878939925", variantName: "Regular (Maximum of 8km distance for delivery)", productName: "Ube Custard" },
-    { id: "45317878972693", variantName: "Mini (Maximum of 8km distance for delivery)", productName: "Ube Custard" }
+    { id: "45317878972693", variantName: "Mini (Maximum of 8km distance for delivery)", productName: "Ube Custard" },
+    { id: "45317873041685", variantName: "Family Size (approxiamtely good for 6 to 8 pax)", productName: "Molo Soup" },
+    { id: "45317880086805", variantName: "Molo Soup", productName: "Molo Soup" },
+    { id: "45746492932373", variantName: "Single Order", productName: "Hearty Chowder" },
+    { id: "48520445985045", variantName: "Creamy Tomato Soup", productName: "Creamy Tomato Soup" }
   ];
 
   /************************************
