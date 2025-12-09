@@ -102,7 +102,7 @@
     { id: "49520067772693", variantName: "Family Size", productName: "Bacon Mac & Cheese" },
     { id: "49520067805461", variantName: "Party Size", productName: "Bacon Mac & Cheese" },
     { id: "49520102572309", variantName: "Family Size", productName: "Cheesy Spaghettimelt" },
-    { id: "49520102605077", variantName: Party Size", productName: "Cheesy Spaghettimelt" }
+    { id: "49520102605077", variantName: "Party Size", productName: "Cheesy Spaghettimelt" }
   ];
 
   /************************************
