@@ -1,7 +1,8 @@
+
 (function () {
   /************************************
    * CONFIG – PDR AUDIT
-   * VERSION 2.0.6
+   * VERSION 2.0.7
    *************************************/
 
   const PANEL_ID = "zapietPdrAuditPanel";
@@ -148,7 +149,6 @@
     { id: "47550075568405", variantName: "Glazed Salmon Rice Bowl", productName: "Glazed Salmon Rice Bowl" }
   ];
 
-
   /************************************
    * HELPERS – RESTAURANT + DATES
    *************************************/
@@ -161,6 +161,7 @@
     } catch (e) {
       console.warn("ZapietEats.getSelectedRestaurant error", e);
     }
+
     if (window.restaurant) return window.restaurant;
     return null;
   }
@@ -169,6 +170,7 @@
 
   function compressDates(dateList) {
     if (!dateList || !dateList.length) return "";
+
     const parsed = dateList
       .map((d) => new Date(d))
       .filter((d) => !isNaN(d))
@@ -183,6 +185,7 @@
     for (let i = 1; i < parsed.length; i++) {
       const curr = parsed[i];
       const diffDays = (curr - prev) / 86400000;
+
       if (diffDays === 1) {
         prev = curr;
       } else {
@@ -191,6 +194,7 @@
         prev = curr;
       }
     }
+
     groups.push([start, prev]);
 
     function fmt(d) {
@@ -201,37 +205,72 @@
       .map(([s, e]) => {
         if (s.getMonth() === e.getMonth()) {
           if (s.getDate() === e.getDate()) return fmt(s);
-          return MONTHS[s.getMonth()] + String(s.getDate()).padStart(2, "0") + "-" + String(e.getDate()).padStart(2, "0");
-        } else {
-          return fmt(s) + "-" + fmt(e);
+
+          return (
+            MONTHS[s.getMonth()] +
+            String(s.getDate()).padStart(2, "0") +
+            "-" +
+            String(e.getDate()).padStart(2, "0")
+          );
         }
+
+        return fmt(s) + "-" + fmt(e);
       })
       .join("; ");
   }
 
   function classifyStatus(pkInfo, dlInfo) {
     const types = new Set();
+
     if (pkInfo && pkInfo.types) pkInfo.types.forEach((t) => types.add(t));
     if (dlInfo && dlInfo.types) dlInfo.types.forEach((t) => types.add(t));
 
     if (types.size === 0) return "NONE";
+
     if (types.size === 1) {
       const t = [...types][0];
+
       if (t === "deny") return "DENY";
       if (t === "allow") return "ALLOW";
+
+      if (t === "until_further_notice") {
+        return "UNAVAILABLE UNTIL FURTHER NOTICE";
+      }
+
       return t.toUpperCase();
     }
+
     return "MIXED";
+  }
+
+  function formatRestriction(info) {
+    if (!info) return "MISSING";
+
+    if (info.types && info.types.has("until_further_notice")) {
+      return "Unavailable Until Further Notice";
+    }
+
+    if (info.dates && info.dates.size) {
+      return compressDates(Array.from(info.dates));
+    }
+
+    return "MISSING";
   }
 
   function getStatusColor(status) {
     switch (status) {
       case "DENY":
         return "#B91C1C";
+
       case "ALLOW":
         return "#15803D";
+
       case "MIXED":
         return "#B45309";
+
+      case "UNAVAILABLE UNTIL FURTHER NOTICE":
+        return "#EA580C";
+
       case "NONE":
       default:
         return "#4B5563";
@@ -248,21 +287,32 @@
     (restaurant.menus || []).forEach((menu) => {
       const pkArr =
         (((menu || {}).config || {}).store_pickup || {}).product_date_restrictions || [];
+
       const dlArr =
         (((menu || {}).config || {}).local_delivery || {}).product_date_restrictions || [];
 
       pkArr.forEach((v) => {
         const vid = String(v.variant_id);
-        if (!pickupInfo[vid]) pickupInfo[vid] = { dates: new Set(), types: new Set() };
+
+        if (!pickupInfo[vid]) {
+          pickupInfo[vid] = { dates: new Set(), types: new Set() };
+        }
+
         (v.restricted_dates || []).forEach((d) => pickupInfo[vid].dates.add(d));
+
         const t = String(v.restriction_type || "deny").toLowerCase();
         pickupInfo[vid].types.add(t);
       });
 
       dlArr.forEach((v) => {
         const vid = String(v.variant_id);
-        if (!deliveryInfo[vid]) deliveryInfo[vid] = { dates: new Set(), types: new Set() };
+
+        if (!deliveryInfo[vid]) {
+          deliveryInfo[vid] = { dates: new Set(), types: new Set() };
+        }
+
         (v.restricted_dates || []).forEach((d) => deliveryInfo[vid].dates.add(d));
+
         const t = String(v.restriction_type || "deny").toLowerCase();
         deliveryInfo[vid].types.add(t);
       });
@@ -275,6 +325,7 @@
    * BUILD DATASET (MEMO vs ZAPIET JSON)
    *************************************/
   const restaurant = getRestaurant();
+
   if (!restaurant) {
     alert("Please select a restaurant in the Zapiet Eats widget first, then run the audit bookmarklet again.");
     return;
@@ -287,18 +338,20 @@
     const pk = pickupInfo[id] || null;
     const dl = deliveryInfo[id] || null;
 
-    const pickupDates = pk && pk.dates.size ? compressDates(Array.from(pk.dates)) : "MISSING";
-    const deliveryDates = dl && dl.dates.size ? compressDates(Array.from(dl.dates)) : "MISSING";
+    const pickupDates = formatRestriction(pk);
+    const deliveryDates = formatRestriction(dl);
+
     const status = classifyStatus(pk, dl);
 
     let missingFlag = "";
+
     if (!pk && !dl) missingFlag = "PK & DL";
     else if (!pk && dl) missingFlag = "PK";
     else if (pk && !dl) missingFlag = "DL";
 
     const hasRestrictions = !!(
-      (pk && pk.dates && pk.dates.size) ||
-      (dl && dl.dates && dl.dates.size)
+      (pk && pk.types && pk.types.size) ||
+      (dl && dl.types && dl.types.size)
     );
 
     return {
@@ -428,6 +481,13 @@
     const deny = rowsData.filter((r) => r.status === "DENY").length;
     const allow = rowsData.filter((r) => r.status === "ALLOW").length;
     const mixed = rowsData.filter((r) => r.status === "MIXED").length;
+
+    const ufn = rowsData.filter(
+      (r) =>
+        r.pickup === "Unavailable Until Further Notice" ||
+        r.delivery === "Unavailable Until Further Notice"
+    ).length;
+
     const none = rowsData.filter((r) => r.status === "NONE").length;
     const missingBoth = rowsData.filter((r) => r.missing === "PK & DL").length;
     const missingPkOnly = rowsData.filter((r) => r.missing === "PK").length;
@@ -435,7 +495,7 @@
 
     summaryStrip.textContent =
       `Total variants: ${total} | DENY: ${deny} | ALLOW: ${allow} | ` +
-      `MIXED: ${mixed} | NONE: ${none} | ` +
+      `MIXED: ${mixed} | UNAVAILABLE UNTIL FURTHER NOTICE: ${ufn} | NONE: ${none} | ` +
       `Missing PK: ${missingPkOnly} | Missing DL: ${missingDlOnly} | Missing PK & DL: ${missingBoth}`;
   }
 
@@ -478,6 +538,7 @@
     th.style.borderBottom = "1px solid #E5E7EB";
     headRow.appendChild(th);
   });
+
   thead.appendChild(headRow);
 
   const tbody = document.createElement("tbody");
@@ -494,6 +555,7 @@
 
   function getFilteredRows() {
     const q = currentSearch.toLowerCase();
+
     return rowsData.filter((r) => {
       let visible = true;
 
@@ -517,6 +579,7 @@
           " " +
           (r.missing || "")
         ).toLowerCase();
+
         if (!haystack.includes(q)) visible = false;
       }
 
@@ -526,13 +589,15 @@
 
   function renderTable() {
     tbody.innerHTML = "";
+
     const rows = getFilteredRows();
 
     rows.forEach((r, idx) => {
       const tr = document.createElement("tr");
       tr.style.borderBottom = "1px solid #F3F4F6";
+
       if (r.missing) {
-        tr.style.background = "#FEF2F2"; // light red for any missing
+        tr.style.background = "#FEF2F2";
       } else if (idx % 2) {
         tr.style.background = "#FFFFFF";
       } else {
@@ -559,6 +624,7 @@
 
       const statusCell = document.createElement("td");
       statusCell.style.padding = "6px 10px";
+
       const badge = document.createElement("span");
       badge.textContent = r.status;
       badge.style.display = "inline-block";
@@ -568,6 +634,7 @@
       badge.style.fontWeight = "600";
       badge.style.color = "#FFFFFF";
       badge.style.background = getStatusColor(r.status);
+
       statusCell.appendChild(badge);
       tr.appendChild(statusCell);
 
@@ -584,14 +651,17 @@
    *************************************/
   function escCsv(val) {
     const s = String(val == null ? "" : val);
+
     if (/[",\n]/.test(s)) {
       return '"' + s.replace(/"/g, '""') + '"';
     }
+
     return s;
   }
 
   function exportCsv() {
     const rows = getFilteredRows();
+
     if (!rows.length) {
       alert("No rows to export for the current filter/search.");
       return;
@@ -629,13 +699,17 @@
     const blob = new Blob([lines.join("\n")], {
       type: "text/csv;charset=utf-8;"
     });
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
+
     a.href = url;
     a.download = "zapiet-pdr-audit.csv";
+
     document.body.appendChild(a);
     a.click();
     a.remove();
+
     URL.revokeObjectURL(url);
   }
 
